@@ -40,6 +40,7 @@ static const int kInputChannelsChangedContext;
 @property (nonatomic, strong) AEAudioFilePlayer *loop2;
 @property (nonatomic, strong) AEBlockChannel *oscillator;
 @property (nonatomic, strong) AEAudioUnitChannel *audioUnitPlayer;
+@property (assign, nonatomic) AudioUnit samplerUnit;
 @property (nonatomic, strong) AEAudioFilePlayer *oneshot;
 @property (nonatomic, strong) AEPlaythroughChannel *playthrough;
 @property (nonatomic, strong) AELimiterFilter *limiter;
@@ -104,10 +105,16 @@ static const int kInputChannelsChangedContext;
     
     _oscillator.channelIsMuted = YES;
     
-    // Create an audio unit channel (a file player)
-    self.audioUnitPlayer = [[AEAudioUnitChannel alloc] initWithComponentDescription:AEAudioComponentDescriptionMake(kAudioUnitManufacturer_Apple, kAudioUnitType_Generator, kAudioUnitSubType_AudioFilePlayer)
+    // Create an audio unit sampler channel
+    AudioComponentDescription description = AEAudioComponentDescriptionMake(kAudioUnitManufacturer_Apple,
+                                                                            kAudioUnitType_MusicDevice,
+                                                                            kAudioUnitSubType_Sampler);
+    
+    self.audioUnitPlayer = [[AEAudioUnitChannel alloc] initWithComponentDescription:description
                                                                      audioController:_audioController
                                                                                error:NULL];
+    
+    _samplerUnit = [self.audioUnitPlayer audioUnit];
     
     // Create a group for loop1, loop2 and oscillator
     _group = [_audioController createChannelGroup];
@@ -330,7 +337,8 @@ static const int kInputChannelsChangedContext;
                     [_oneshotAudioUnitButton setTitle:@"Stop" forState:UIControlStateSelected];
                     [_oneshotAudioUnitButton sizeToFit];
                     [_oneshotAudioUnitButton setSelected:_oneshot != nil];
-                    [_oneshotAudioUnitButton addTarget:self action:@selector(oneshotAudioUnitPlayButtonPressed:) forControlEvents:UIControlEventTouchUpInside];
+                    [_oneshotAudioUnitButton addTarget:self action:@selector(oneshotAudioUnitPlayButtonPressed:) forControlEvents:UIControlEventTouchDown];
+                    [_oneshotAudioUnitButton addTarget:self action:@selector(oneshotAudioUnitPlayButtonReleased:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
                     cell.textLabel.text = @"One Shot (Audio Unit)";
                     break;
                 }
@@ -481,6 +489,13 @@ static const int kInputChannelsChangedContext;
 }
 
 - (void)oneshotAudioUnitPlayButtonPressed:(UIButton*)sender {
+    UInt32 noteOnCommand = 0x9 << 4 | 0;
+    // UInt32 noteCommand = 0x8 << 4 | 0;
+    MusicDeviceMIDIEvent(_samplerUnit, noteOnCommand, 60, 127.0, 0);
+    return;
+    
+    // ORIGINAL IMPLEMENTATION
+    
     if ( !_audioUnitFile ) {
         NSURL *playerFile = [[NSBundle mainBundle] URLForResource:@"Organ Run" withExtension:@"m4a"];
         checkResult(AudioFileOpenURL((__bridge CFURLRef)playerFile, kAudioFileReadPermission, 0, &_audioUnitFile), "AudioFileOpenURL");
@@ -528,6 +543,12 @@ static const int kInputChannelsChangedContext;
 	checkResult(AudioUnitSetProperty(_audioUnitPlayer.audioUnit, kAudioUnitProperty_ScheduleStartTimeStamp, kAudioUnitScope_Global, 0, &startTime, sizeof(startTime)),
 			   "AudioUnitSetProperty(kAudioUnitProperty_ScheduleStartTimeStamp)");
 
+}
+
+- (void)oneshotAudioUnitPlayButtonReleased:(UIButton*)sender {
+    UInt32 noteOffCommand = 0x8 << 4 | 0;
+    MusicDeviceMIDIEvent(_samplerUnit, noteOffCommand, 60, 127.0, 0);
+    return;
 }
 
 - (void)playthroughSwitchChanged:(UISwitch*)sender {
