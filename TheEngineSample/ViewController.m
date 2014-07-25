@@ -31,7 +31,7 @@ static const int kInputChannelsChangedContext;
 #define kAuxiliaryViewTag 251
 
 
-@interface ViewController () {
+@interface ViewController () <AEAudioTimingReceiver> {
     AudioFileID _audioUnitFile;
     AEChannelGroupRef _group;
 }
@@ -60,6 +60,36 @@ static const int kInputChannelsChangedContext;
 @end
 
 @implementation ViewController
+
+static float tempo;
+static UInt32 qn, en;
+
+static UInt64 total_frames = 0;
+static UInt64 next_beat_frame = UINT64_MAX;
+static UInt64 end_beat_frame = UINT64_MAX;
+
+static void timingReceiver(id receiver,
+                           AEAudioController *audioController,
+                           const AudioTimeStamp *time,
+                           UInt32 const frames,
+                           AEAudioTimingContext context)
+{
+    ViewController *this = (ViewController *)receiver;
+    for (int i=0; i<frames; i++) {
+        if (end_beat_frame == total_frames){
+            UInt32 noteOffCommand = 0x8 << 4 | 0;
+            MusicDeviceMIDIEvent(this->_samplerUnit, noteOffCommand, 60, 127.0, 0);
+        }
+        if (next_beat_frame == total_frames) {
+            UInt32 noteOnCommand = 0x9 << 4 | 0;
+            MusicDeviceMIDIEvent(this->_samplerUnit, noteOnCommand, 60, 127.0, 0);
+            
+            next_beat_frame = total_frames + qn;
+            end_beat_frame = total_frames + en;
+        }
+        total_frames++;
+    }
+}
 
 - (id)initWithAudioController:(AEAudioController*)audioController {
     if ( !(self = [super initWithStyle:UITableViewStyleGrouped]) ) return nil;
@@ -125,7 +155,21 @@ static const int kInputChannelsChangedContext;
     
     [_audioController addObserver:self forKeyPath:@"numberOfInputChannels" options:0 context:(void*)&kInputChannelsChangedContext];
     
+    // calculate frames in a quarter note for MIDI metronome
+    tempo = 4 / 2.0 * 60.0;  // 4 beats in 2.0 secs * 60 secs per min for bpm
+    qn = 44100/tempo * 60. * 2.0; // sample rate / tempo * secs per min * 2.0
+    en = qn / 2;
+    
+    next_beat_frame = 0;
+    
+    [_audioController addTimingReceiver:self];
+    
     return self;
+}
+
+- (AEAudioControllerTimingCallback)timingReceiverCallback
+{
+    return &timingReceiver;
 }
 
 -(void)dealloc {
@@ -490,7 +534,6 @@ static const int kInputChannelsChangedContext;
 
 - (void)oneshotAudioUnitPlayButtonPressed:(UIButton*)sender {
     UInt32 noteOnCommand = 0x9 << 4 | 0;
-    // UInt32 noteCommand = 0x8 << 4 | 0;
     MusicDeviceMIDIEvent(_samplerUnit, noteOnCommand, 60, 127.0, 0);
     return;
     
@@ -548,7 +591,6 @@ static const int kInputChannelsChangedContext;
 - (void)oneshotAudioUnitPlayButtonReleased:(UIButton*)sender {
     UInt32 noteOffCommand = 0x8 << 4 | 0;
     MusicDeviceMIDIEvent(_samplerUnit, noteOffCommand, 60, 127.0, 0);
-    return;
 }
 
 - (void)playthroughSwitchChanged:(UISwitch*)sender {
